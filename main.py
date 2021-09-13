@@ -1,9 +1,10 @@
 import makepath
 
-import numpy as np
-
-from pyFEM.core import Structure
+from pyFEM import Structure
 from docxtpl import DocxTemplate
+
+import numpy as np
+import matplotlib.pyplot as plt
 import pprint
 
 pp = pprint.PrettyPrinter(sort_dicts=False)
@@ -11,7 +12,7 @@ pp = pprint.PrettyPrinter(sort_dicts=False)
 camion_CC14 = {
     'separacion_ejes': [4.3, 4.3],
     'peso_ejes': [40, 160, 160],
-    'carga_carril': 10.8,
+    'carga_carril': 10.3,
     'separacion_ruedas': 1.8,
     'separacion_borde': 0.6
 }
@@ -20,7 +21,7 @@ camion_CC14 = {
 factor_presencia_multiple = {1: 1.2, 2: 1}
 
 
-def superestructura():
+def superestructura(params={}):
     # losa: losa
     # carpetaAsfaltica: carpeta asfaltica
     # Nb: cantidad de vigas, -
@@ -29,42 +30,154 @@ def superestructura():
     # S_overhang: voladizo, m
     # L: longitud de la superestructura, m
 
-    L = 12
-    superestructura = {
-        'losa': losa(),
-        'carpetaAsfaltica': carpeta_asfaltica(),
-        'Nb': 3,
-        'vigas': viga_i({'L': L}),
-        'S': 1.69,
-        'S_overhang': 1.56,
-        'L': 12
-    }
+    # svigas = 2
+    # bf = 'bf'
+    # elosa = 
+    # pesoconcreto = 
 
-    model = create_model(superestructura)
+    params = {}
+    nb = params['nb'] = params.get('nb', 4) # numero de vigas 
+    nl = params['nl'] = params.get('nl', 2) # numero de carriles cargados
+    fy = params['fy'] = params.get('fy', 420000) # acero en kPa
+    fc = params['fc'] = params.get('fc', 28000)  # concreto en kPa
+    tiposeccion = params['tiposeccion'] = params.get('tiposeccion', 'e') # tipo de seccion del puente
+    factormodcarga = params['factormodcarga'] = params.get('factormodcarga', 1) # factor de modificacion de carga
+    L = params['L'] = params.get('L', 14) # Longitud de la luz
+    svigas = params['svigas'] = params.get('svigas', 2) # Separacion entre vigas
+    distvoladizo = params['distvoladizo'] = params.get('distvoladizo', 1) # distancia del voladizo desde el centro de la viga
+    baseviga = params['baseviga'] = params.get('baseviga', 0.4) # base de la viga
+    hviga = params['hviga'] = params.get('hviga', 0.8) # altura de la viga
+    elosa = params['elosa'] = params.get('elosa', 0.2) # espesor de la losa
+    pesoconcreto = params['pesoconcreto'] = params.get('pesoconcreto', 23.54) # peso especifico del concreto
+    pesoasfalto = params['pesoasfalto'] = params.get('pesoasfalto', 21.57) # peso especifico del asfalto
+    pesobaranda = params['pesobaranda'] = params.get('pesobaranda', 0.6865) # peso especifico de la baranda
+    nbarandas = params['nbaranda'] = params.get('nbaranda', 2) # numero de barandas
+    nbordillo = params['nbordillo'] = params.get('nbordillo', 2) # numero de bordillos
+    seccionbordillo1 = params['seccionbordillo1'] = params.get('seccionbordillo1', 0.2) # ancho bordillo
+    seccionbordillo2 = params['seccionbordillo2'] = params.get('seccionbordillo2', 0.3) # alto bordillo
+    ecarpetaasf = params['ecarpetaasf'] = params.get('ecarpetaasf', 0.08) # espesor carperta asfaltica
+    MLv = params['MLv'] = params.get('MLv', 843) # valor asumido del momento generado por el vehiculo, debe ser calculado
+    MLc = params['MLc'] = params.get('MLc', 252) # valor asumido del momento generado por el carril, debe ser calculado
+    IM = params['IM'] = params.get('IM', 1.33)  # factor de amplificacion dinamica de carga
+    n = params['n'] = params.get('n', 1) # Relacion modular
+    b1 = params['b1'] = params.get('b1', 2.2) # Distancia para el calculo del factor de distribucion regla de la palanca
+    b2 = params['b2'] = params.get('b2', 0.4) # Distancia para el calculo del factor de distribucion regla de la palanca
+    rec = params['rec'] = params.get('rec', 0.1) # recubrimiento del acero
+    frf = params['frf'] = params.get('frf', 0.9) # factor de resistencia por flexion
+    rbarra = params['rbarra'] = params.get('rbarra', 8) # referencia de la barra
+    abarra = params['abarra'] = params.get('abarra', 0.000510) # area de la barra en metros
+    pb1 = params['pb1'] = params.get('pb1', 0.85) # valor para el calculo dela profundidad del bloque de compresiones
+    duc = params['duc'] = params.get('duc', 0.003) # deformacion unitaria del concreto
+    duas = params['duas'] = params.get('duas', 0.005) # deformacion unitaria del acero supuesta
+    y3 = params['y3'] = params.get('y3', 0.75) # valor del concreto para el momento requerido por la combinacion de carga
+    y1 = params['y1'] = params.get('y1', 1.6) # valor del concreto para el momento requerido por la combinacion de carga
 
-    parametro_rigidez_longitudinal(superestructura)
+    Ec = params['Ec'] = 4800 * (fc / 1000) ** 0.5 #Modulo de elasticidad del concreto
+    hmin = params['hmin'] = 0.07*L # altura minima
+    hseccion = params['hseccion'] = hviga + elosa  # altura de la seccion compuesta
+    bf = params['bf'] = (svigas/2) + distvoladizo # ancho efectico de la aleta
+    DClosa = params['DClosa'] = bf*elosa*pesoconcreto # carga de la losa
+    DCviga = params['DCviga'] = baseviga*hviga*pesoconcreto # carga de la viga
+    DCest = params['DCest'] = DClosa + DCviga # carga de la estructura
+    DCbaranda = params['DCbaranda'] = (pesobaranda*nbarandas)/nb # carga de la baranda
+    DCbordillo = params['DCbordillo'] = (seccionbordillo1*seccionbordillo2*pesoconcreto*nbordillo)/nb # carga del bordillo
+    DCper = params['DCper'] = DClosa + DCviga + DCbordillo + DCbaranda # carga DC
+    DW = params['DW'] = ecarpetaasf*bf*pesoasfalto # carga del asfalto   
+    MDCest = params['MDCest'] = (DCest*(14**2))/8 # Momento maximo estructura
+    MDW = params['MDW'] = (DW*(14**2))/8 # Momento maximo del asfalto
+    MDCvol = params['MDCvol'] = ((DCbordillo + DCbaranda)*(14**2))/8 # Momento maximo del voladizo
+    MDCper = params['MDCper'] = MDCest + MDCvol # Momento maximo carga DC
+    MLLIM = params['MLLIM'] = (IM*MLv) + MLc # Momento maximo carga viva vehicular
+    A = params['A'] = baseviga*hviga # Area de la viga seccion simple
+    y = params['y'] = hviga/2 # centroide la viga seccion simple
+    Al = params['Al'] = bf*elosa # Area de la losa seccion simple
+    yl = params['yl'] = elosa/2 # centroide la losa seccion simple
+    Ac = params['Ac'] = A + Al # Area de la seccion compuesta
+    yc = params['yc'] = ((A*y)+(Al*(yl+hviga)))/Ac # centroide la seccion compuesta
+    I = params['I'] = (baseviga*(hviga**3))/12 # inercia de la viga sección simple
+    Il = params['Il'] = (bf*(elosa**3))/12 # inercia de la losa sección simple
+    Ic = params['Ic'] = (I +(A*((yc-y)**2))) + (Il +(Al*(((yl+hviga)-yc)**2)))  # inercia de la sección compuesta
+    Snc = params['Snc'] = I/y # modulo de la seccion simple
+    Sc = params['Sc'] = Ic/yc # modulo de la seccion compuesta
+    eg = params['eg'] = hseccion-(elosa/2)-(hviga/2) # distancia entre centroides de la viga y la losa
+    kg = params['kg'] = n*(I + (A*(eg**2))) # Parametro para el calculo del factor de distribucion
+    de = params['de'] = distvoladizo - seccionbordillo1 # distancia entre eje de la viga exterior y la cara interna de la bordillo
+    mg1i = params['mg1i'] = 0.06 + ((svigas/4.3)**0.4)*((svigas/L)**0.3)*((kg/(L*elosa**3))**0.1) # factor de distribucion
+    mg2i = params['mg2i'] = 0.075 + ((svigas/2.9)**0.6)*((svigas/L)**0.2)*((kg/(L*elosa**3))**0.1) # factor de distribucion
+    g1e = params['g1e'] =  (b1 + b2)/(2*svigas) # factor de distribucion sin mayorar por el factor de presencia multiple
+    mg1e = params['mg1e'] = 1.2*0.65 # factor de distribucion
+    mg2e = params['mg2e'] = (0.77 + (de/2.80))*mg2i # factor de distribucion
+    MLLIMp = params['MLLIMp'] = MLLIM*mg2e # momento maximo debido a la carga viva con el factor de distribucion maximo hallado
+    MUI = params['MUI'] = factormodcarga*((1.25*MDCper)+(1.5*MDW)+(1.75*MLLIMp)) # momento ultimo para resistencia I
+    d = params['d'] = hseccion - rec # altura efectiva
+    k = params['k'] = MUI/(bf*(d**2)) # parametro K para la cuantia
+    m = params['m'] = fy/(0.85*fc) # parametro m para la cuantia
+    p = params['p'] = (1/m)*(1-(1-((2*m*k)/(frf*fy)))**0.5) # cuantia
+    As = params['As'] = p*d*bf # acero de refuerzo
+    nbarra = params['nbarra'] = As/abarra # numero de barras a usar
+    a = params['a'] = (p*d*fy)/(0.85*fc) # posicion del eje neutro
+    pc = params['pc'] = (As*fy)/(0.85*fc*bf*pb1) # profundidad del bloque de compresiones
+    dua = params['dua'] = (d-pc)*(duc/pc) # deformacion unitaria del acero
 
-    factor_distribucion_momentos_viga_interior(superestructura)
-    factor_distribucion_cortante_viga_interior(superestructura)
-    factor_distribucion_momento_viga_exterior(superestructura)
-    factor_distribucion_diseno(superestructura)
+    # 'losa': losa(),
+    # 'carpetaAsfaltica': carpeta_asfaltica(),
+    # 'Nb': 3,
+    # 'vigas': viga_i({'L': L}),
+    # 'S': 1.69,
+    # 'S_overhang': 1.56,
+    # 'L': L,
+    # 'baseviga': 0.4,
+    # 'fy': 420000,
+    # 'fc': 28000,
+    # 'tipodeseccion': 'e',
+    # 'factormodcarga': 1,
+    # 'svigas': svigas,
+    # 'bf': (svigas / 2 ) * 2,
+    # 'hviga': 0.8,
+    # 'elosa': 0.2,
+    # 'pesoconcreto': 2.4,
+    
+    # 'DCviga': 0.2,
+    # 'DCbordillo': 0.2,
+    # 'DCbaranda': 0.2,
+    # 'DW': 0.2,
+    # }
+
+    # superestructura['']
+    # 
+    model = create_model(params)
+
+    # mz = model.internal_forces['DC'][1].mz
+    # x = np.linspace(0, L, len(mz))
+    # params['MDC'] = [[x, m] for x, m in zip(x, mz)]
+    # mz = model.internal_forces['DW'][1].mz
+    # x = np.linspace(0, L, len(mz))
+    # params['MDW'] = [[x, m] for x, m in zip(x, mz)]
+
+    # parametro_rigidez_longitudinal(superestructura)
+
+    # factor_distribucion_momentos_viga_interior(superestructura)
+    # factor_distribucion_cortante_viga_interior(superestructura)
+    # factor_distribucion_momento_viga_exterior(superestructura)
+    # factor_distribucion_diseno(superestructura)
 
     # avalúo de cargas
-    avaluo_carga(superestructura)
+    # avaluo_carga(superestructura)
 
     # momentos flectores
     # cargas permanentes
-    momentos_flectores_cargas_permanentes(superestructura, model)
+    momentos_flectores_cargas_estructura(params, model)
+    momentos_flectores_cargas_permanentes(params, model)
     # carpeta asfaltica
-    momentos_flectores_carpeta_asfaltica(superestructura, model)
-    momentos_flectores_bordillos_barandas(superestructura, model)
+    # momentos_flectores_carpeta_asfaltica(superestructura, model)
+    # momentos_flectores_bordillos_barandas(superestructura, model)
     # carga viva vehicular
-    momentos_flectores_carga_viva_vehicular(superestructura, model)
+    momentos_flectores_carga_viva_vehicular(params, model)
 
     # combinaciones de carga
-    combinaciones_carga(superestructura)
+    # combinaciones_carga(superestructura)
 
-    return superestructura
+    return params
 
 
 def carpeta_asfaltica(params={}):
@@ -413,17 +526,23 @@ def avaluo_carga(superestructura):
 
 def create_model(superestructura):
     # pyFEM model
+    L = superestructura['L']
+    Ec = superestructura['Ec']
+    Iz = superestructura['I']
+    DCper = superestructura['DCper']
+    DW = superestructura['DW']
+
     model = Structure(uy=True, rz=True)
 
     # add material
-    model.add_material(1, E=superestructura['vigas']['E'])
+    model.add_material(1, E=Ec)
 
     # add section
-    model.add_section(1, Iz=superestructura['vigas']['I'])
+    model.add_section(1, Iz=Iz)
 
     # add joints
     model.add_joint(1, x=0)
-    model.add_joint(2, x=superestructura['L'])
+    model.add_joint(2, x=L)
 
     # add frame
     model.add_frame(1, 1, 2, 1, 1)
@@ -432,26 +551,83 @@ def create_model(superestructura):
     model.add_support(1, uy=True)
     model.add_support(2, uy=True)
 
+    model.set_flags_active_joint_displacements()
+    model.set_indexes()
+    model.set_stiffness_matrix_modified_by_supports()
+
     # add load patterns
-    model.add_load_pattern('test')
-    model.add_distributed_load('test', frame=1, fy=-1)
+    # model.add_load_pattern('DC')
+    # model.add_distributed_load('DC', 1, fy=-DCper)
+    
+    # model.add_load_pattern('DW')
+    # model.add_distributed_load('DW', 1, fy=-DW)
+    
+    # model.solve()
 
     return model
 
-def momentos_flectores_cargas_permanentes(superestructura, model):
-    carga_permanente = superestructura['avaluoCarga']['cargaMuerta']['total']
+def plot(x, y, name, title, ylabel):
+    # loadPattern = model.load_patterns['MDC']
+    # mz = model.internal_forces[loadPattern][frame].mz
+
+    fig, ax = plt.subplots()
+
+    ax.plot(x, y, 'r')
+    ax.set_title(title)  # 'Momento flector'
+    ax.set_xlim(min(x), max(x))
+    ax.set_ylim(ymax=0)
+
+    ax.set_xlabel('m')
+    ax.set_ylabel(ylabel)  # 'kN m'
+
+    ax.set_xticks(x[::2])
+    ax.set_yticks(list(set(np.round_(y[::2], 3))))
+    ax.grid(True)
+
+    fig.savefig(f'{name}.png')
+
+def momentos_flectores_cargas_estructura(params, model):
+    carga_estructura = params['DCest']  # superestructura['avaluoCarga']['cargaMuerta']['total']
+
+    frame = model.frames[1]
+    length = frame.get_length()
+    loadPattern = model.add_load_pattern("cargaPermanenteest")
+    loadPattern.add_distributed_load(frame.name, fy=-carga_estructura)
+
+    model.solve_load_pattern(loadPattern.name)
+
+    mz = frame.get_internal_forces(loadPattern.name, 20)['mz'] # model.internal_forces[loadPattern.name][frame.name].mz
+    x = np.linspace(0, length, len(mz))
+
+
+    plot(x, -mz, 'Mdnc', 'Momentos flectores', 'kN m')
+
+    x = x[::2]
+    mz = mz[::2]
+    params['Mdnc'] = [[x, m] for x, m in zip(x, mz)]
+
+def momentos_flectores_cargas_permanentes(params, model):
+    carga_permanente = params['DCper']  # superestructura['avaluoCarga']['cargaMuerta']['total']
 
     frame = model.frames[1]
     length = frame.get_length()
     loadPattern = model.add_load_pattern("cargaPermanente")
-    loadPattern.add_distributed_load(frame, fy=-carga_permanente)
+    loadPattern.add_distributed_load(frame.name, fy=-carga_permanente)
 
-    model.solve()
+    model.solve_load_pattern(loadPattern.name)
 
-    mz = model.internal_forces[loadPattern][frame].mz
-    n = len(mz)
+    mz = frame.get_internal_forces(loadPattern.name, 20)['mz'] # model.internal_forces[loadPattern.name][frame.name].mz
+    x = np.linspace(0, length, len(mz))
 
-    superestructura['momentosFlectoresCargasPermanentes'] = [[i / (n - 1) * length, m] for i, m in enumerate(mz)]
+
+    plot(x, -mz, 'MDC', 'Momentos flectores', 'kN m')
+
+    x = x[::2]
+    mz = mz[::2]
+    params['MDC'] = [[x, m] for x, m in zip(x, mz)]
+
+
+
 
 def momentos_flectores_carpeta_asfaltica(superestructura, model):
     carga_carpeta = superestructura['avaluoCarga']['cargaSobreimpuesta']['carpetaAsfaltica']
@@ -487,9 +663,7 @@ def momentos_flectores_bordillos_barandas(superestructura, model):
     superestructura['momentosFlectoresBordillosBarandas'] = [[i / (n - 1) * length, m] for i, m in enumerate(mz)]
 
 
-def momentos_flectores_carga_viva_vehicular(superestructura, model):
-    frames = {frame: key for key, frame in model.frames.items()}
-
+def momentos_flectores_carga_viva_vehicular(params, model):
     frame = model.frames[1]
     length = frame.get_length()
 
@@ -501,7 +675,7 @@ def momentos_flectores_carga_viva_vehicular(superestructura, model):
     
     length_camion = x_ejes[-1]
     casos_carga_camion_CC14 = []
-    n = 21 # NUMERO PARADAS CAMION
+    n = 41 # NUMERO PARADAS CAMION
     peso_ejes = camion_CC14['peso_ejes']
     for i in range(n):
         x = (i / (n - 1)) * (length + length_camion)
@@ -510,21 +684,21 @@ def momentos_flectores_carga_viva_vehicular(superestructura, model):
 
         for i, xi in enumerate(x - x_ejes):
             if length > xi > 0:
-                loadPattern.add_point_load_at_frame(frame, fy=(-peso_ejes[i], xi / length))
+                loadPattern.add_point_load_at_frame(frame.name, fy=(-peso_ejes[i], xi / length))
 
-        casos_carga_camion_CC14.append(model.load_patterns['{:.3f} m'.format(x)])
+        casos_carga_camion_CC14.append(loadPattern.name) # model.load_patterns['{:.3f} m'.format(x)]
 
     # carga carril
     w = -camion_CC14['carga_carril']
     loadPattern = model.add_load_pattern('carril')
-    loadPattern.add_distributed_load(frame, fy=w)
+    loadPattern.add_distributed_load(frame.name, fy=w)
 
     model.solve()
 
     n = 11  # cantidad de valores por elemento por defecto
     momentos = {(i / (n - 1) * length): [] for i in range(n)}
     for load_pattern in casos_carga_camion_CC14:
-        mz = model.internal_forces[load_pattern][frame].mz
+        mz = model.internal_forces[load_pattern][frame.name].mz
         n = len(mz)
 
         for i in range(n):
@@ -536,20 +710,24 @@ def momentos_flectores_carga_viva_vehicular(superestructura, model):
         momentos_maximos.append([x, max(m)])
 
     loadPattern = model.load_patterns['carril']
-    momentos_carril = []
-    for i, m in enumerate(model.internal_forces[loadPattern][frame].mz):
-        momentos_carril.append([(i / (n - 1)) * length, m])
-
+    momentos_carril = [[(i / (n - 1)) * length, m] for i, m in enumerate(model.internal_forces[loadPattern.name][frame.name].mz)]
 
     momentos_carga_vehicular = []
-    factor_distribucion = superestructura['factorDistribucionDiseno']
+    # factor_distribucion = params['factorDistribucionDiseno']
     for i, (camion, carril) in enumerate(zip(momentos_maximos, momentos_carril)):
         x = camion[0]
-        momentos_carga_vehicular.append([x, factor_distribucion * (1.33 * camion[1] + carril[1])])
+        momentos_carga_vehicular.append([x, 1.33 * camion[1] + carril[1]])  # factor_distribucion * ()
+    
+    params['MLV'] = momentos_maximos
+    params['MLC'] = momentos_carril
+    params['MLL'] = momentos_carga_vehicular
 
-    superestructura['momentosFlectoresCamion'] = momentos_maximos
-    superestructura['momentosFlectoresCarril'] = momentos_carril
-    superestructura['momentosFlectoresCargaVehicular'] = momentos_carga_vehicular
+    params['MLVmax'] = max([m[1] for m in momentos_maximos])
+    params['MLCmax'] = max([m[1] for m in momentos_carril])
+    params['MLLmax'] = max([m[1] for m in momentos_carga_vehicular])
+
+    return params
+    
 
 def combinaciones_carga(superestructura):
     superestructura['combinacionesCarga'] = {}
@@ -590,7 +768,7 @@ if __name__ == '__main__':
     # pp.pprint(superestructura)
 
     # doc template
-    doc = DocxTemplate('Memoria de cálculos de las vigas metálicas del puente.docx')
-
+    doc = DocxTemplate('template.docx')
     doc.render(superestructura)
     doc.save('output.docx')
+    print('todo ok')
