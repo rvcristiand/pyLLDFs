@@ -566,7 +566,7 @@ def create_model(superestructura):
 
     return model
 
-def plot(x, y, name, title, ylabel):
+def plot(x, y, name, title, ylabel, no_ticks=2):
     # loadPattern = model.load_patterns['MDC']
     # mz = model.internal_forces[loadPattern][frame].mz
 
@@ -575,13 +575,15 @@ def plot(x, y, name, title, ylabel):
     ax.plot(x, y, 'r')
     ax.set_title(title)  # 'Momento flector'
     ax.set_xlim(min(x), max(x))
-    ax.set_ylim(ymax=0)
+    # ax.set_ylim(ymax=0)
+
+    ax.invert_yaxis()
 
     ax.set_xlabel('m')
     ax.set_ylabel(ylabel)  # 'kN m'
 
-    ax.set_xticks(x[::2])
-    ax.set_yticks(list(set(np.round_(y[::2], 3))))
+    ax.set_xticks(x[::no_ticks])
+    ax.set_yticks(list(set(np.round_(y[::no_ticks], 3))))
     ax.grid(True)
 
     fig.savefig(f'{name}.png')
@@ -600,7 +602,7 @@ def momentos_flectores_cargas_estructura(params, model):
     x = np.linspace(0, length, len(mz))
 
 
-    plot(x, -mz, 'Mdnc', 'Momentos flectores', 'kN m')
+    plot(x, mz, 'Mdnc', 'Momentos flectores', 'kN m')
 
     x = x[::2]
     mz = mz[::2]
@@ -620,7 +622,7 @@ def momentos_flectores_cargas_permanentes(params, model):
     x = np.linspace(0, length, len(mz))
 
 
-    plot(x, -mz, 'MDC', 'Momentos flectores', 'kN m')
+    plot(x, mz, 'MDC', 'Momentos flectores', 'kN m')
 
     x = x[::2]
     mz = mz[::2]
@@ -664,63 +666,85 @@ def momentos_flectores_bordillos_barandas(superestructura, model):
 
 
 def momentos_flectores_carga_viva_vehicular(params, model):
+    # viga
     frame = model.frames[1]
     length = frame.get_length()
 
+    # camion
     x_ejes = np.array([0] + camion_CC14['separacion_ejes'])
 
-    for i in range(x_ejes.shape[0]):
+    for i in range(len(x_ejes)):
         for j in range(i+1, len(x_ejes)):
             x_ejes[j] += x_ejes[i]
-    
+
     length_camion = x_ejes[-1]
     casos_carga_camion_CC14 = []
-    n = 41 # NUMERO PARADAS CAMION
     peso_ejes = camion_CC14['peso_ejes']
+
+    n = 401 # NUMERO PARADAS CAMION
     for i in range(n):
         x = (i / (n - 1)) * (length + length_camion)
 
         loadPattern = model.add_load_pattern('{:.3f} m'.format(x))
 
-        for i, xi in enumerate(x - x_ejes):
-            if length > xi > 0:
-                loadPattern.add_point_load_at_frame(frame.name, fy=(-peso_ejes[i], xi / length))
+        for j, xi in enumerate(x - x_ejes):
+            if 0 < xi < length:
+                loadPattern.add_point_load_at_frame(frame.name, fy=(-peso_ejes[j], xi / length))
 
         casos_carga_camion_CC14.append(loadPattern.name) # model.load_patterns['{:.3f} m'.format(x)]
 
-    # carga carril
+        x = (n - 1 - i) / (n - 1) * (length + length_camion) - length_camion
+
+        loadPattern = model.add_load_pattern('-{:.3f} m'.format(x))
+
+        for j, xi in enumerate(x + x_ejes):
+            if 0 < xi < length:
+                loadPattern.add_point_load_at_frame(frame.name, fy=(-peso_ejes[j], xi / length))
+
+        casos_carga_camion_CC14.append(loadPattern.name)
+
+    #  carril
     w = -camion_CC14['carga_carril']
     loadPattern = model.add_load_pattern('carril')
     loadPattern.add_distributed_load(frame.name, fy=w)
 
+    # for load_pattern, loadPattern in model.load_patterns.items():
+    #     if loadPattern.point_loads_at_frames:
+    #         for point_load in loadPattern.point_loads_at_frames[frame.name]:
+    #             print(point_load)
+                
+        
     model.solve()
 
-    n = 11  # cantidad de valores por elemento por defecto
-    momentos = {(i / (n - 1) * length): [] for i in range(n)}
+    n = 401  # cantidad de valores por elemento por defecto
+    momentos = {'{:.3f}'.format(i / (n - 1) * length): [] for i in range(n)}
+    
+    frame = model.frames[1]
+
     for load_pattern in casos_carga_camion_CC14:
-        mz = model.internal_forces[load_pattern][frame.name].mz
-        n = len(mz)
+        mz = frame.get_internal_forces(load_pattern, n-1)['mz']
 
         for i in range(n):
-            x = (i / (n - 1)) * length
-            momentos[x].append(mz[i])
+            momentos['{:.3f}'.format(i / (n - 1) * length)].append(mz[i])
 
     momentos_maximos = []
-    for x, m in momentos.items():
-        momentos_maximos.append([x, max(m)])
+    for i, m in enumerate(momentos.values()):
+        momentos_maximos.append([i / (n - 1) * length, max(m)])
 
     loadPattern = model.load_patterns['carril']
-    momentos_carril = [[(i / (n - 1)) * length, m] for i, m in enumerate(model.internal_forces[loadPattern.name][frame.name].mz)]
+    momentos_carril = [[(i / (n - 1)) * length, m] for i, m in enumerate(frame.get_internal_forces(loadPattern.name, n-1)['mz'])]
 
     momentos_carga_vehicular = []
     # factor_distribucion = params['factorDistribucionDiseno']
     for i, (camion, carril) in enumerate(zip(momentos_maximos, momentos_carril)):
         x = camion[0]
         momentos_carga_vehicular.append([x, 1.33 * camion[1] + carril[1]])  # factor_distribucion * ()
+
+    plot([x_m[0] for x_m in momentos_carga_vehicular], [x_m[1] for x_m in momentos_carga_vehicular], 'MLL', 'Momentos flectores', 'kN m', 40)
     
-    params['MLV'] = momentos_maximos
-    params['MLC'] = momentos_carril
-    params['MLL'] = momentos_carga_vehicular
+    params['MLV'] = momentos_maximos[::40]
+    params['MLC'] = momentos_carril[::40]
+    params['MLL'] = momentos_carga_vehicular[::40]
 
     params['MLVmax'] = max([m[1] for m in momentos_maximos])
     params['MLCmax'] = max([m[1] for m in momentos_carril])
